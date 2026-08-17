@@ -1,0 +1,133 @@
+version: "3.9"
+
+services:
+
+  # ── FastAPI Application ────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agriscan_api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./models:/app/models:ro      # mount trained YOLO model
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agriscan_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Celery Worker (AI Processing) ─────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agriscan_worker
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.tasks.celery_app worker
+      --loglevel=info
+      --concurrency=2
+      --queues=default
+    env_file: .env
+    volumes:
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agriscan_net
+
+  # ── Celery Beat (scheduled tasks) ─────────────────────────────────────────
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agriscan_beat
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.tasks.celery_app beat
+      --loglevel=info
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - agriscan_net
+
+  # ── Celery Flower (monitoring UI at :5555) ─────────────────────────────────
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agriscan_flower
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.tasks.celery_app flower
+      --port=5555
+    env_file: .env
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - worker
+    networks:
+      - agriscan_net
+
+  # ── Redis (Celery broker + result backend) ─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: agriscan_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agriscan_net
+
+  # ── MinIO (local S3-compatible storage for development) ───────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: agriscan_minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"     # S3 API
+      - "9001:9001"     # Web console
+    environment:
+      MINIO_ROOT_USER: agriscan
+      MINIO_ROOT_PASSWORD: agriscan_secret
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - agriscan_net
+
+volumes:
+  redis_data:
+  minio_data:
+
+networks:
+  agriscan_net:
+    driver: bridge
