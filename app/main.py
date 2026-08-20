@@ -12,7 +12,7 @@ from app.config import settings
 from app.database import db
 from app.utils.logger import setup_logging
 from app.routers import auth, farms, fields, uploads, results, notifications, health
-from app.routers import predict  # ✅ Prediction router import
+from app.routers import predict
 
 
 setup_logging()
@@ -43,7 +43,15 @@ app = FastAPI(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-allowed_origins = getattr(settings, 'ALLOWED_ORIGINS', ["*"])
+# ✅ CORS - DIRECT SET (Dashboard ki zaroorat nahi)
+allowed_origins = [
+    "https://agriscan-3d.netlify.app",
+    "https://agriscan-3d.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "*"  # Sab allow (production mein specific domains daalna)
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -80,7 +88,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 PREFIX = "/api/v1"
 
-# ✅ PREDICT ROUTER AB IS LIST MEIN ADD HO GAYA HAI
 routers_to_include = [
     (health.router, "Health"),
     (auth.router, "Auth"),
@@ -89,7 +96,7 @@ routers_to_include = [
     (uploads.router, "Uploads"),
     (results.router, "Results"),
     (notifications.router, "Notifications"),
-    (predict.router, "Disease Prediction"),  # ✅ Yeh line add ki gayi hai
+    (predict.router, "Disease Prediction"),
 ]
 
 for router, tag in routers_to_include:
