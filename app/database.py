@@ -1,10 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import IndexModel, ASCENDING, DESCENDING, GEOSPHERE
 import logging
-import os
 
-MONGODB_URI = os.environ.get("MONGODB_URI")
-MONGODB_DB_NAME = os.environ.get("MONGODB_DB_NAME", "agriscan_db")
 logger = logging.getLogger(__name__)
 
 
@@ -15,7 +12,7 @@ class Database:
 
     async def connect(self):
         if self.client is None:
-            # ✅ Direct MongoDB URI (Hardcoded)
+            # ✅ DIRECT MONGODB URI (Hardcoded)
             MONGODB_URI = "mongodb+srv://fazailabbasi005_db_user:Scout2816@agriscan3d.l8gxxmx.mongodb.net/?appName=Agriscan3d"
             MONGODB_DB_NAME = "agriscan_db"
             
@@ -25,12 +22,10 @@ class Database:
                 minPoolSize=5,
                 serverSelectionTimeoutMS=5000,
             )
-
             self.database = self.client[MONGODB_DB_NAME]
 
             await self.client.admin.command("ping")
             logger.info("✅ MongoDB Connected")
-
             await self.ensure_indexes()
 
     async def close(self):
@@ -80,6 +75,7 @@ class Database:
             IndexModel([("created_at", DESCENDING)]),
         ])
 
+        # ✅ PREDICTIONS COLLECTION INDEXES
         await db.predictions.create_indexes([
             IndexModel([("user_id", ASCENDING)]),
             IndexModel([("created_at", DESCENDING)]),
