@@ -1,8 +1,10 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import IndexModel, ASCENDING, DESCENDING, GEOSPHERE
-from app.config import settings
 import logging
+import os
 
+MONGODB_URI = os.environ.get("MONGODB_URI")
+MONGODB_DB_NAME = os.environ.get("MONGODB_DB_NAME", "agriscan_db")
 logger = logging.getLogger(__name__)
 
 
@@ -13,14 +15,18 @@ class Database:
 
     async def connect(self):
         if self.client is None:
+            # ✅ Direct MongoDB URI (Hardcoded)
+            MONGODB_URI = "mongodb+srv://fazailabbasi005_db_user:Scout2816@agriscan3d.l8gxxmx.mongodb.net/?appName=Agriscan3d"
+            MONGODB_DB_NAME = "agriscan_db"
+            
             self.client = AsyncIOMotorClient(
-                settings.MONGODB_URL,
+                MONGODB_URI,
                 maxPoolSize=50,
                 minPoolSize=5,
                 serverSelectionTimeoutMS=5000,
             )
 
-            self.database = self.client[settings.MONGODB_DB_NAME]
+            self.database = self.client[MONGODB_DB_NAME]
 
             await self.client.admin.command("ping")
             logger.info("✅ MongoDB Connected")
@@ -74,7 +80,6 @@ class Database:
             IndexModel([("created_at", DESCENDING)]),
         ])
 
-        # ✅ PREDICTIONS COLLECTION INDEXES (Naya add)
         await db.predictions.create_indexes([
             IndexModel([("user_id", ASCENDING)]),
             IndexModel([("created_at", DESCENDING)]),
@@ -110,7 +115,6 @@ class Database:
     def jobs(self):
         return self.database.jobs
 
-    # ✅ PREDICTIONS PROPERTY (Naya add)
     @property
     def predictions(self):
         return self.database.predictions
@@ -118,10 +122,6 @@ class Database:
 
 db = Database()
 
-
-# ------------------------------------------------------------------
-# Compatibility helpers for dependencies.py and other modules
-# ------------------------------------------------------------------
 
 def get_client():
     return db.client
