@@ -1,4 +1,3 @@
-# app/routers/predict.py
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.services.disease_predictor import predictor
 from app.database import db
@@ -17,12 +16,15 @@ async def predict_disease(
         raise HTTPException(400, "Only image files allowed")
     
     try:
+        # 1. Image read
         image_bytes = await file.read()
         
+        # 2. Prediction
         start_time = time.time()
         result = predictor.predict(image_bytes)
         inference_time = round((time.time() - start_time) * 1000, 2)
         
+        # 3. Data to save
         prediction_data = {
             "user_id": user_id or "anonymous",
             "image_url": f"/test_images/{uuid.uuid4()}.jpg",
@@ -35,20 +37,33 @@ async def predict_disease(
             "created_at": datetime.utcnow()
         }
         
-        # ✅ FIXED: db.db["predictions"] use karo
-        collection = db.db["predictions"]
-        inserted = await collection.insert_one(prediction_data)
-        prediction_data["_id"] = str(inserted.inserted_id)
+        # 4. ✅ Database save (HAR HALAT MEIN)
+        try:
+            # Pehle try: db.database se
+            collection = db.database["predictions"]
+            inserted = await collection.insert_one(prediction_data)
+            print("✅ Saved via db.database, ID:", inserted.inserted_id)
+        except AttributeError:
+            # Fallback: db.db se
+            collection = db.db["predictions"]
+            inserted = await collection.insert_one(prediction_data)
+            print("✅ Saved via db.db, ID:", inserted.inserted_id)
+        except Exception as e:
+            # Agar MongoDB down hai toh bhi prediction fail nahi hogi
+            print("❌ MongoDB Save Error (ignored):", str(e))
+            inserted = None
         
+        # 5. Response
         return {
             "success": True,
             "data": result,
             "inference_time_ms": inference_time,
-            "saved_to_db": True,
-            "prediction_id": str(inserted.inserted_id)
+            "saved_to_db": inserted is not None,
+            "prediction_id": str(inserted.inserted_id) if inserted else None
         }
     
     except Exception as e:
+        print("❌ Prediction Error:", str(e))
         raise HTTPException(500, f"Prediction failed: {str(e)}")
 
 
@@ -62,7 +77,12 @@ async def get_prediction_history(
     if user_id:
         query["user_id"] = user_id
     
-    collection = db.db["predictions"]
+    # Collection access with fallback
+    try:
+        collection = db.database["predictions"]
+    except AttributeError:
+        collection = db.db["predictions"]
+    
     cursor = collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
     
     predictions = []
@@ -87,7 +107,12 @@ async def get_prediction_stats(user_id: str = None):
     if user_id:
         query["user_id"] = user_id
     
-    collection = db.db["predictions"]
+    # Collection access with fallback
+    try:
+        collection = db.database["predictions"]
+    except AttributeError:
+        collection = db.db["predictions"]
+    
     total = await collection.count_documents(query)
     healthy_count = await collection.count_documents({**query, "is_healthy": True})
     diseased_count = await collection.count_documents({**query, "is_healthy": False})
