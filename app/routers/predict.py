@@ -9,9 +9,11 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.database import db
+from app.config import get_settings
+from app.dependencies import get_optional_current_user
 from app.services.disease_predictor import predictor
 
 logger = logging.getLogger(__name__)
@@ -22,15 +24,29 @@ router = APIRouter()
 @router.post("/predict")
 async def predict_disease(
     file: UploadFile = File(...),
-    user_id: str = None
+    current_user=Depends(get_optional_current_user),
 ):
     # ── 1. Validate upload ────────────────────────────────────────────────
+    settings = get_settings()
+
     if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(400, "Only image files allowed")
+        raise HTTPException(415, "Only image files allowed")
+
+    # Phase 12: enforce the configured size limit before reading the whole
+    # body into memory (DoS guard). Content-Length is a first check; the
+    # streamed read below is the authoritative one.
+    declared_size = file.size if getattr(file, "size", None) is not None else None
+    if declared_size is not None and declared_size > settings.MAX_UPLOAD_SIZE:
+        raise HTTPException(413, "Image too large")
 
     # ── 2. AI inference ───────────────────────────────────────────────────
     try:
         image_bytes = await file.read()
+
+        # Authoritative streamed-size check (Content-Length can be absent
+        # or lying; a chunked/oversized body must still be rejected).
+        if len(image_bytes) > settings.MAX_UPLOAD_SIZE:
+            raise HTTPException(413, "Image too large")
 
         start_time = time.time()
         result = predictor.predict(image_bytes)
@@ -48,14 +64,22 @@ async def predict_disease(
     )
 
     # ── 3. Persist (non-fatal: inference result is returned either way) ──
+    # User attribution: the verified JWT subject is the ONLY trusted source
+    # of user_id. Client-supplied identifiers are never accepted — the legacy
+    # insecure ?user_id= query parameter was removed (Phase 4 security fix):
+    # it allowed any caller to impersonate arbitrary users. Unauthenticated
+    # scans are recorded as "anonymous".
+    attributed_user_id = str(current_user["_id"]) if current_user else "anonymous"
+
     prediction_data = {
-        "user_id": user_id or "anonymous",
+        "user_id": attributed_user_id,
         "image_url": f"/test_images/{uuid.uuid4()}.jpg",
         "crop": result.get("crop", "unknown"),
         "disease": result.get("disease", "unknown"),
         "confidence": result.get("confidence", 0.0),
         "is_healthy": result.get("is_healthy", False),
         "class_name": result.get("class_name", "unknown"),
+        "class_index": result.get("class_index"),
         "inference_time_ms": inference_time,
         "created_at": datetime.utcnow()
     }
@@ -69,7 +93,8 @@ async def predict_disease(
     except Exception:
         logger.exception("MongoDB save failed for prediction")
 
-    # ── 4. Response (contract unchanged) ─────────────────────────────────
+    # ── 4. Response (contract: existing top-level fields unchanged; the
+    # structured `result` dict now also carries the real model class_index) ──
     return {
         "success": True,
         "data": result,

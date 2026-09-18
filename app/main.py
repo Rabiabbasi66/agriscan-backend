@@ -13,6 +13,7 @@ from app.database import db
 from app.utils.logger import setup_logging
 from app.routers import auth, farms, fields, uploads, results, notifications, health
 from app.routers import predict
+from app.routers import predictions
 
 
 setup_logging()
@@ -43,18 +44,15 @@ app = FastAPI(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# ✅ CORS - DIRECT SET (Dashboard ki zaroorat nahi)
-allowed_origins = [
-    "https://agriscan-3d.netlify.app",
-    "https://agriscan-3d.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "*"  # Sab allow (production mein specific domains daalna)
-]
-
+# ✅ CORS — configured origins only (Phase 12 hardening).
+# The previous wildcard "*" was both insecure AND non-functional for
+# credentialed requests (browsers reject "Access-Control-Allow-Origin: *"
+# together with allow_credentials). Origins now come exclusively from
+# settings.ALLOWED_ORIGINS (env-overridable) — localhost dev and the
+# deployed Netlify/Vercel frontends are covered by the defaults.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,6 +95,7 @@ routers_to_include = [
     (results.router, "Results"),
     (notifications.router, "Notifications"),
     (predict.router, "Disease Prediction"),
+    (predictions.router, "Predictions"),
 ]
 
 for router, tag in routers_to_include:

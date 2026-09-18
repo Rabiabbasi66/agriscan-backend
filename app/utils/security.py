@@ -67,16 +67,14 @@ def decode_access_token(token: str):
             algorithms=[settings.JWT_ALGORITHM],
         )
 
-        print("DECODED PAYLOAD:", payload)
-
+        # Phase 12: payloads are never printed (contained the user id/email);
+        # failures are logged without token material.
         if payload.get("type") != "access":
-            print("TOKEN TYPE ERROR:", payload.get("type"))
             return None
 
         return payload
 
-    except JWTError as e:
-        print("JWT DECODE ERROR:", e)
+    except JWTError:
         return None
 
 

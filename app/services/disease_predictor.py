@@ -35,15 +35,18 @@ class DiseasePredictor:
         top_idx = probs.top1
         confidence = probs.top1conf.item()
         disease_name = self.class_names[top_idx]
-        
+
         crop, disease = self._parse_disease_name(disease_name)
-        
+
+        # Phase 6: expose the real top-1 class index from the classifier.
+        # This is genuine model output (no synthetic severity/GPS/yield).
         return {
             "disease": disease,
             "crop": crop,
             "confidence": round(confidence * 100, 2),
             "is_healthy": "healthy" in disease.lower(),
-            "class_name": disease_name
+            "class_name": disease_name,
+            "class_index": int(top_idx),
         }
     
     def _parse_disease_name(self, full_name):
