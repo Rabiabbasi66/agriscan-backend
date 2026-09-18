@@ -13,4 +13,7 @@ async def test_upload_requires_auth():
             files={"files": ("test.jpg", io.BytesIO(b"fake"), "image/jpeg")},
             data={"field_id": "000000000000000000000001", "source": "mobile"},
         )
-        assert resp.status_code == 401
+        # Missing/invalid credentials are rejected: HTTPBearer auto_error
+        # responds 403 ("Not authenticated"); treat 401/403 both as unauthenticated.
+        assert resp.status_code in (401, 403)
+

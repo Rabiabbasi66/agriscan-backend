@@ -1,0 +1,16 @@
+__pycache__
+*.pyc
+venv/
+.venv/
+.git
+*.db
+*.sqlite3
+
+# IMPORTANT: YE BADA DATASET IGNORE KARO
+plantvillage_dataset/
+*.jpg
+*.jpeg
+*.png
+*.pt
+*.pth
+*.h5
