@@ -14,11 +14,13 @@ async def test_create_farm_requires_auth():
             "total_area": 50000,
             "crop_type": "Wheat",
         })
-        assert resp.status_code == 401
+        # HTTPBearer missing credentials → 403 "Not authenticated".
+        assert resp.status_code in (401, 403)
 
 
 @pytest.mark.asyncio
 async def test_list_farms_requires_auth():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/v1/farms")
-        assert resp.status_code == 401
+        assert resp.status_code in (401, 403)
+

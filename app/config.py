@@ -4,29 +4,6 @@ from typing import List
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
-    # App
-    APP_NAME: str = "AgriScan 3D API"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = False
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:8443", "http://localhost:3000"]
-
-    # MongoDB Atlas
-    MONGODB_URL: str = "mongodb://localhost:27017"
-    MONGODB_DB_NAME: str = "agriscan"
-
-    # JWT
-    JWT_SECRET_KEY: str = "change-me-in-production-32-chars-min"
-    JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from functools import lru_cache
-from typing import List
-
-
-class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
