@@ -12,5 +12,4 @@ agriscan_model/
 .pytest_cache/
 .vscode/
 .idea/
-.env.example
 .env.local

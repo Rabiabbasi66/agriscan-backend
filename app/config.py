@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field
 from functools import lru_cache
 from typing import List
 
@@ -22,8 +23,22 @@ class Settings(BaseSettings):
     ]
 
     # MongoDB (Local Compass)
-    MONGODB_URL: str = "mongodb://localhost:27017"
+    # MONGODB_URI / MONGODB_DB_NAME are read from the environment or the local
+    # .env file. Never hardcode real credentials here — set them in .env only.
+    # The legacy MONGODB_URL variable name is accepted as an alias.
+    MONGODB_URI: str = Field(
+        default="mongodb://localhost:27017",
+        validation_alias=AliasChoices("MONGODB_URI", "MONGODB_URL"),
+    )
     MONGODB_DB_NAME: str = "agriscan"
+
+    @property
+    def mongodb_uri(self) -> str:
+        return self.MONGODB_URI
+
+    @property
+    def mongodb_db_name(self) -> str:
+        return self.MONGODB_DB_NAME
 
     # JWT
     JWT_SECRET_KEY: str = "change-me-in-production-32-chars-min"
