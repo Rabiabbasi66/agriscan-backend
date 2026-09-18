@@ -2,28 +2,37 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import IndexModel, ASCENDING, DESCENDING, GEOSPHERE
 import logging
 
+from app.config import get_settings
+
 logger = logging.getLogger(__name__)
 
 
 class Database:
+    """MongoDB connection holder.
+
+    Connection settings (URI + database name) come exclusively from the
+    application configuration system (app.config.Settings, backed by
+    environment variables / a local .env file). No credentials live in code.
+    """
+
     def __init__(self):
         self.client = None
         self.database = None
 
     async def connect(self):
         if self.client is None:
-            # ✅ DIRECT MONGODB URI (Hardcoded)
-            MONGODB_URI = "mongodb+srv://fazailabbasi005_db_user:Scout2816@agriscan3d.l8gxxmx.mongodb.net/?appName=Agriscan3d"
-            MONGODB_DB_NAME = "agriscan_db"
-            
+            settings = get_settings()
+
             self.client = AsyncIOMotorClient(
-                MONGODB_URI,
+                settings.mongodb_uri,
                 maxPoolSize=50,
                 minPoolSize=5,
                 serverSelectionTimeoutMS=5000,
             )
-            self.database = self.client[MONGODB_DB_NAME]
+            self.database = self.client[settings.mongodb_db_name]
 
+            # Fail fast on startup if the server is unreachable; indexes are
+            # only ensured once the connection has been verified.
             await self.client.admin.command("ping")
             logger.info("✅ MongoDB Connected")
             await self.ensure_indexes()
