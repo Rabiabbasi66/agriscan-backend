@@ -20,7 +20,13 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://localhost:8443",
         "http://localhost:3000",
+        # Deployed frontends (public URLs, also overridable via env).
+        "https://agriscan-3d.netlify.app",
+        "https://agriscan-3d.vercel.app",
     ]
+
+    # Upload security: maximum accepted image size in bytes (10 MB default).
+    MAX_UPLOAD_SIZE: int = 10_485_760
 
     # MongoDB (Local Compass)
     # MONGODB_URI / MONGODB_DB_NAME are read from the environment or the local
