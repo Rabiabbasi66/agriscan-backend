@@ -215,7 +215,7 @@ def _install_fake_predict_stack(monkeypatch, user=None):
     # be ignored — identity comes from the verified token only).
 
     import app.routers.predict as predict_module
-    monkeypatch.setattr(predict_module, "predictor", _FakePredictor())
+    monkeypatch.setattr(predict_module, "get_predictor", lambda: _FakePredictor())
 
     collection = MagicMock()
     collection.insert_one = AsyncMock(return_value=AsyncMock(inserted_id=ObjectId()))

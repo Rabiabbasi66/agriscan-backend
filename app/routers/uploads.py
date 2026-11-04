@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import List, Optional
-from bson import ObjectId
 
 from app.dependencies import get_db, get_current_active_user
 from app.schemas.upload import UploadOut, JobStatusOut
@@ -66,7 +65,6 @@ async def job_status(
     """Poll the processing job status for an upload."""
     job = await db.jobs.find_one({"upload_id": upload_id})
     if not job:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Job not found")
     return DataResponse(data=JobStatusOut(
         job_id=str(job["_id"]),

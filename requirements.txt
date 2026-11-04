@@ -1,24 +1,30 @@
-fastapi
-uvicorn[standard]
-python-multipart
-pydantic
-pydantic-settings
-python-dotenv
-motor
-pymongo
-python-jose[cryptography]
-passlib[bcrypt]
-bcrypt
-boto3
-celery[redis]
-redis
-kombu
-ultralytics
-opencv-python-headless
-numpy
-Pillow
-httpx
-requests
-reportlab
-psutil
-email-validator
+# Pinned to the versions currently used and validated by the project's test suite.
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+pydantic==2.10.3
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+motor==3.6.0
+pymongo==4.9.2
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.0
+boto3==1.35.80
+celery[redis]==5.4.0
+redis==5.2.0
+kombu==5.4.2
+ultralytics==8.3.56
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+Pillow==11.0.0
+httpx==0.28.1
+requests==2.32.3
+reportlab==4.2.5
+psutil==6.1.0
+email-validator==2.3.0
+# torch / torchvision are installed FIRST in the Dockerfile from the official
+# CPU wheel index (https://download.pytorch.org/whl/cpu). The pins below match
+# that install so pip does not reinstall them (and never pulls CUDA deps).
+torch==2.5.1
+torchvision==0.20.1

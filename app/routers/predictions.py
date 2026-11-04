@@ -1,17 +1,6 @@
-# app/routers/predictions.py
-#
-# Prediction History — authenticated access to the predictions the current
-# user created via POST /api/v1/predict (app/routers/predict.py).
-#
-# Endpoints:
-#   GET  /api/v1/predictions                    → paginated history (newest first)
-#   GET  /api/v1/predictions/{prediction_id}    → single prediction detail
-#
-# User isolation: every query is scoped to the JWT subject (user_id), so a
-# user can only ever see their own documents. Ownership failures return 404
-# (never a distinction between "missing" and "not yours").
-from datetime import datetime
-
+# Prediction history for the authenticated user: paginated list plus single
+# detail. Every query is scoped to the JWT subject, and an ownership failure
+# returns 404 so "missing" and "not yours" are indistinguishable.
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase

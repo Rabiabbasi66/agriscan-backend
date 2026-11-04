@@ -1,5 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import IndexModel, ASCENDING, DESCENDING, GEOSPHERE
+from pymongo.errors import PyMongoError
 import logging
 
 from app.config import get_settings
@@ -19,23 +20,42 @@ class Database:
         self.client = None
         self.database = None
 
-    async def connect(self):
-        if self.client is None:
-            settings = get_settings()
+    async def connect(self) -> bool:
+        """Connect to MongoDB. Returns False (instead of crashing the API) when
+        the deployment is unreachable: AI inference and the static frontend
+        must keep working even if the database is down."""
+        if self.client is not None:
+            return True
 
-            self.client = AsyncIOMotorClient(
+        settings = get_settings()
+
+        try:
+            client = AsyncIOMotorClient(
                 settings.mongodb_uri,
                 maxPoolSize=50,
                 minPoolSize=5,
                 serverSelectionTimeoutMS=5000,
             )
-            self.database = self.client[settings.mongodb_db_name]
+            database = client[settings.mongodb_db_name]
 
-            # Fail fast on startup if the server is unreachable; indexes are
-            # only ensured once the connection has been verified.
-            await self.client.admin.command("ping")
-            logger.info("✅ MongoDB Connected")
+            # Verify the connection before using it (DNS + auth + reachability).
+            await client.admin.command("ping")
+        except (PyMongoError, ValueError) as exc:
+            logger.error(
+                "MongoDB unavailable — starting without persistence: %s", exc
+            )
+            return False
+
+        self.client = client
+        self.database = database
+        logger.info("MongoDB connected")
+
+        try:
             await self.ensure_indexes()
+        except PyMongoError:
+            logger.exception("MongoDB index creation failed (continuing)")
+
+        return True
 
     async def close(self):
         if self.client:
@@ -84,7 +104,6 @@ class Database:
             IndexModel([("created_at", DESCENDING)]),
         ])
 
-        # ✅ PREDICTIONS COLLECTION INDEXES
         await db.predictions.create_indexes([
             IndexModel([("user_id", ASCENDING)]),
             IndexModel([("created_at", DESCENDING)]),
@@ -94,7 +113,7 @@ class Database:
             IndexModel([("is_healthy", ASCENDING)]),
         ])
 
-        logger.info("✅ MongoDB indexes ensured")
+        logger.info("MongoDB indexes ensured")
 
     @property
     def users(self):
@@ -138,11 +157,3 @@ def get_database():
             "Database is not connected. Call await db.connect() first."
         )
     return db.database
-
-
-async def connect_db():
-    await db.connect()
-
-
-async def close_db():
-    await db.close()

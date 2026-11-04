@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 
 from app.main import app
 from app.dependencies import get_db
-from app.utils.security import hash_password
 
 BASE = "/api/v1/auth"
 

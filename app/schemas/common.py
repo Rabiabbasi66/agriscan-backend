@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Any, Generic, TypeVar, List
-from datetime import datetime
+from typing import Generic, TypeVar, List
 from bson import ObjectId
 
 T = TypeVar("T")

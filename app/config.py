@@ -17,9 +17,16 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     ALLOWED_ORIGINS: List[str] = [
+        # Local dev: Vite binds 0.0.0.0, so the browser may open the app as
+        # either localhost or 127.0.0.1 — both must be accepted or the auth /
+        # history calls are blocked by CORS and the UI stays in its loading
+        # state.
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:8443",
+        "http://127.0.0.1:8443",
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
         # Deployed frontends (public URLs, also overridable via env).
         "https://agriscan-3d.netlify.app",
         "https://agriscan-3d.vercel.app",
@@ -64,10 +71,24 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
 
-    # AI Model
-    YOLO_MODEL_PATH: str = "models/agriscan_yolov8.pt"
+    # AI Model — trained PlantVillage classifier (38 classes). Paths are
+    # resolved relative to backend/, independent of the shell CWD.
+    YOLO_MODEL_PATH: str = "models/best.pt"
+    # Minimum top-1 confidence required to report a class; below it the API
+    # returns detected=false instead of guessing a disease.
     YOLO_CONFIDENCE_THRESHOLD: float = 0.40
     YOLO_IOU_THRESHOLD: float = 0.45
+
+    # Plant-domain validation. The ImageNet checkpoint already in the repo
+    # scores "does this look like a plant at all"; the calibrated reference
+    # (class centroids) scores "does this look like a supported leaf".
+    PLANT_GATE_MODEL_PATH: str = "yolov8n-cls.pt"
+    DOMAIN_REFERENCE_PATH: str = "models/domain_guard.npz"
+    # ImageNet plant-class probability mass that accepts an image.
+    # Calibrated on real non-plant photos: 97.5th percentile = 0.030.
+    PLANT_SCORE_THRESHOLD: float = 0.03
+    # Laplacian-variance floor; 0.5th percentile of held-out leaves = 15.2.
+    BLUR_VARIANCE_THRESHOLD: float = 12.0
 
     # Firebase
     FCM_SERVER_KEY: str = ""

@@ -1,14 +1,11 @@
 """
 WebSocket endpoint for real-time job progress notifications.
 Connect: ws://host/api/v1/notifications/ws/{user_id}
-Server sends JSON messages as job progresses.
+Server sends JSON messages as the job progresses.
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
-from motor.motor_asyncio import AsyncIOMotorDatabase
-from app.dependencies import get_db
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import asyncio
-import json
 import logging
 
 router = APIRouter(
