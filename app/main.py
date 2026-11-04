@@ -1,4 +1,3 @@
-# app/main.py
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -14,6 +13,8 @@ from app.utils.logger import setup_logging
 from app.routers import auth, farms, fields, uploads, results, notifications, health
 from app.routers import predict
 from app.routers import predictions
+from app.services.disease_predictor import get_predictor
+from starlette.concurrency import run_in_threadpool
 
 
 setup_logging()
@@ -23,8 +24,20 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 AgriScan 3D API starting up...")
-    await db.connect()
-    logger.info("✅ Connected to MongoDB")
+    if await db.connect():
+        logger.info("✅ Connected to MongoDB")
+    else:
+        logger.warning("MongoDB unavailable - AI scans run without persistence")
+
+    # Load the trained weights once and keep them resident. Failures are
+    # logged instead of aborting startup: /predict then answers 503 clearly.
+    try:
+        predictor = await run_in_threadpool(get_predictor)
+        await run_in_threadpool(predictor.warm_up)
+        logger.info("✅ YOLOv8 model ready (%d classes)", predictor.num_classes)
+    except Exception:
+        logger.exception("❌ YOLOv8 model failed to load — /predict will return 503")
+
     yield
     logger.info("🔻 Shutting down...")
     await db.close()
@@ -32,8 +45,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title=settings.APP_NAME if hasattr(settings, 'APP_NAME') else "AgriScan 3D API",
-    version=settings.APP_VERSION if hasattr(settings, 'APP_VERSION') else "1.0.0",
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
     description="AgriScan 3D AI Crop Disease Detection API",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -44,12 +57,8 @@ app = FastAPI(
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# ✅ CORS — configured origins only (Phase 12 hardening).
-# The previous wildcard "*" was both insecure AND non-functional for
-# credentialed requests (browsers reject "Access-Control-Allow-Origin: *"
-# together with allow_credentials). Origins now come exclusively from
-# settings.ALLOWED_ORIGINS (env-overridable) — localhost dev and the
-# deployed Netlify/Vercel frontends are covered by the defaults.
+# Explicit origins only: a wildcard is incompatible with allow_credentials
+# (browsers reject "Access-Control-Allow-Origin: *" on credentialed requests).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -58,7 +67,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve uploaded files
 app.mount(
     "/test_images",
     StaticFiles(directory="test_images"),
@@ -86,8 +94,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 PREFIX = "/api/v1"
 
-routers_to_include = [
-    (health.router, "Health"),
+# Health lives outside the API prefix so probes can hit plain /health/health.
+app.include_router(health.router, tags=["Health"])
+
+for router, tag in [
     (auth.router, "Auth"),
     (farms.router, "Farms"),
     (fields.router, "Fields"),
@@ -96,14 +106,8 @@ routers_to_include = [
     (notifications.router, "Notifications"),
     (predict.router, "Disease Prediction"),
     (predictions.router, "Predictions"),
-]
-
-for router, tag in routers_to_include:
-    if router is not None:
-        if router == health.router:
-            app.include_router(router, tags=[tag])
-        else:
-            app.include_router(router, prefix=PREFIX, tags=[tag])
+]:
+    app.include_router(router, prefix=PREFIX, tags=[tag])
 
 
 @app.get("/")
@@ -111,7 +115,7 @@ async def root():
     return {
         "message": "AgriScan 3D API",
         "status": "running",
-        "version": settings.APP_VERSION if hasattr(settings, 'APP_VERSION') else "1.0.0"
+        "version": settings.APP_VERSION,
     }
 
 

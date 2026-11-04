@@ -67,8 +67,7 @@ def decode_access_token(token: str):
             algorithms=[settings.JWT_ALGORITHM],
         )
 
-        # Phase 12: payloads are never printed (contained the user id/email);
-        # failures are logged without token material.
+        # Callers only ever see a payload of the expected token type.
         if payload.get("type") != "access":
             return None
 

@@ -29,6 +29,21 @@ router = APIRouter(
 )
 
 
+def require_database(database):
+    """503 when MongoDB is unreachable.
+
+    Called inside handlers (after body validation) rather than as a
+    dependency, so malformed input still returns 422 while the database is
+    down instead of being masked by a 503.
+    """
+    if database is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        )
+    return database
+
+
 @router.post(
     "/register",
     response_model=DataResponse[UserOut],
@@ -38,6 +53,7 @@ async def register(
     data: UserRegister,
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    db = require_database(db)
     existing = await db.users.find_one({"email": data.email})
 
     if existing:
@@ -80,6 +96,7 @@ async def login(
     data: UserLogin,
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    db = require_database(db)
     user = await db.users.find_one({"email": data.email})
 
     if not user:
@@ -137,6 +154,7 @@ async def refresh(
     body: RefreshTokenRequest,
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    db = require_database(db)
     payload = decode_refresh_token(body.refresh_token)
 
     if payload is None:
@@ -174,6 +192,7 @@ async def update_me(
     current_user=Depends(get_current_active_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    db = require_database(db)
     update = {
         k: v
         for k, v in body.model_dump().items()
@@ -212,6 +231,7 @@ async def change_password(
     current_user=Depends(get_current_active_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
+    db = require_database(db)
     if not verify_password(body.old_password, current_user["hashed_password"]):
         raise HTTPException(400, "Old password is incorrect")
 

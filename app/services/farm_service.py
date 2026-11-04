@@ -4,7 +4,6 @@ from fastapi import HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.schemas.farm import FarmCreate, FarmUpdate, FarmOut, FarmListItem
-from app.schemas.common import serialize_doc
 import logging
 
 logger = logging.getLogger(__name__)

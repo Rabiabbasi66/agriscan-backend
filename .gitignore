@@ -13,3 +13,13 @@ agriscan_model/
 .vscode/
 .idea/
 .env.local
+docker-test.env
+docker-test.env.err
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Runtime logs
+logs/
+*.log

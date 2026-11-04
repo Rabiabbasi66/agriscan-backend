@@ -3,14 +3,39 @@ __pycache__
 venv/
 .venv/
 .git
+# Never bake secrets into the image (provided via Cloud Run env vars)
+.env
 *.db
 *.sqlite3
 
 # IMPORTANT: YE BADA DATASET IGNORE KARO
 plantvillage_dataset/
+
+# Dev image assets stay out of the production image
 *.jpg
 *.jpeg
 *.png
+
+# Local dev/runtime artifacts
+logs/
+uploads/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker/dev config files are not needed inside the image
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Trained-model/binary weights excluded by default...
 *.pt
 *.pth
 *.h5
+
+# ...but these runtime assets ARE required in the production image:
+# - models/best.pt: loaded at import time by DiseasePredictor (startup crash if missing)
+# - test_images/:   mounted via StaticFiles(directory="test_images") in app/main.py
+!models/best.pt
+!test_images/
+!test_images/**

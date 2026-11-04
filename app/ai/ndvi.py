@@ -1,19 +1,3 @@
-"""
-NDVI Estimation (RGB images)
-----------------------------
-The drone/mobile captures processed by AgriScan 3D are plain RGB — there is no
-near-infrared channel, so a true NDVI cannot be computed from them. This module
-provides a documented RGB-based vegetation proxy: the Excess Green index (ExG =
-2G - R - B), normalised to the [-1, 1] NDVI range. It keeps the same interface
-the processing pipeline expects:
-
-    calculate_ndvi_rgb(image_bgr) -> (ndvi_mean: float, ndvi_image: np.ndarray)
-
-`ndvi_mean` is the field-level vegetation value stored on the analysis result;
-`ndvi_image` is a colour-mapped visualisation (green = healthy vegetation).
-If NIR imagery becomes available, replace the index computation here — the
-pipeline interface stays the same.
-"""
 
 from __future__ import annotations
 

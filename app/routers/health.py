@@ -1,8 +1,11 @@
 from fastapi import APIRouter
 from app.database import get_client
 from app.config import settings
+import logging
 import psutil
 import time
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/health")
 _start_time = time.time()
@@ -20,13 +23,16 @@ async def health():
 
 @router.get("/health/full", summary="Detailed health check (DB + system)")
 async def health_full():
-    # DB ping
+    client = get_client()
     db_ok = False
-    try:
-        await get_client().admin.command("ping")
-        db_ok = True
-    except Exception:
-        pass
+    if client is None:
+        logger.warning("Health check: MongoDB is not connected")
+    else:
+        try:
+            await client.admin.command("ping")
+            db_ok = True
+        except Exception:
+            logger.warning("Health check: MongoDB ping failed", exc_info=True)
 
     cpu = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory()

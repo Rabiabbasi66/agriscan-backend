@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
+from bson.errors import InvalidId
 import logging
 
 from app.database import db
@@ -9,23 +10,33 @@ from app.utils.security import decode_access_token
 
 logger = logging.getLogger(__name__)
 
-# Argon use karo - HTTPBearer (Simple aur best!)
 security = HTTPBearer()
 
 
 def get_db() -> AsyncIOMotorDatabase:
+    # May be None while MongoDB is unreachable. Handlers that need it check
+    # availability themselves (or depend on an auth helper that does), so
+    # request-body validation still runs first and returns 422 as usual.
     return db.database
+
+
+async def _find_active_user(payload: dict) -> dict | None:
+    """Look up the active user referenced by a decoded token payload."""
+    if db.database is None or "sub" not in payload:
+        return None
+    try:
+        return await db.database.users.find_one(
+            {"_id": ObjectId(payload["sub"]), "is_active": True}
+        )
+    except (InvalidId, TypeError):
+        return None
 
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    # Phase 12: credentials/tokens are never logged (the previous debug
-    # prints leaked the raw bearer token to stdout). Only non-sensitive
-    # pass/fail information is logged.
-    token = credentials.credentials
-
-    payload = decode_access_token(token)
+    # Tokens are never logged; only the pass/fail reason is recorded.
+    payload = decode_access_token(credentials.credentials)
     if not payload:
         logger.info("Auth rejected: invalid or expired token")
         raise HTTPException(
@@ -33,13 +44,13 @@ async def get_current_user(
             detail="Invalid or expired token",
         )
 
-    user = await db.database.users.find_one(
-        {
-            "_id": ObjectId(payload["sub"]),
-            "is_active": True,
-        }
-    )
+    if db.database is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        )
 
+    user = await _find_active_user(payload)
     if not user:
         logger.info("Auth rejected: user not found or inactive")
         raise HTTPException(
@@ -77,17 +88,7 @@ async def get_optional_current_user(
         return None
 
     payload = decode_access_token(credentials.credentials)
-    if not payload or "sub" not in payload:
+    if not payload:
         return None
 
-    try:
-        user = await db.database.users.find_one(
-            {
-                "_id": ObjectId(payload["sub"]),
-                "is_active": True,
-            }
-        )
-    except Exception:
-        return None
-
-    return user
+    return await _find_active_user(payload)

@@ -1,22 +1,4 @@
-"""
-YOLOv8 Disease Detector
------------------------
-Loads the AgriScan YOLOv8 model and runs inference on a single image (numpy array
-or file path). Returns structured detection results.
 
-Training classes (index → disease):
-  0  Healthy
-  1  Leaf_Blight
-  2  Powdery_Mildew
-  3  Root_Rot
-  4  Wheat_Rust
-  5  Downy_Mildew
-  6  Septoria_Leaf_Spot
-  7  Fusarium_Wilt
-  8  Bacterial_Blight
-  9  Early_Blight
-  10 Late_Blight
-"""
 
 from __future__ import annotations
 import logging
@@ -89,6 +71,15 @@ def run_detection(image: np.ndarray) -> dict:
     """
     t0 = time.perf_counter()
     model = _get_model()
+
+    # Guard: the trained checkpoint is a classifier (yolov8n-cls). Running it
+    # through this detection path would silently return zero boxes ("healthy"),
+    # so refuse instead of reporting a false negative.
+    if getattr(model, "task", None) == "classify":
+        raise RuntimeError(
+            "run_detection() requires a detection checkpoint; "
+            "YOLO_MODEL_PATH points to a classifier. Use DiseasePredictor."
+        )
 
     results = model.predict(
         source=image,

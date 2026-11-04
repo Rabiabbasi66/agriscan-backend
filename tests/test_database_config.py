@@ -183,7 +183,7 @@ def stub_predictor(monkeypatch):
                 "class_name": "Potato___Early_blight",
             }
 
-    monkeypatch.setattr(predict_router, "predictor", _StubPredictor())
+    monkeypatch.setattr(predict_router, "get_predictor", lambda: _StubPredictor())
 
 
 def _mock_predictions_collection(monkeypatch):

@@ -1,10 +1,9 @@
-from annotated_types import doc
-from fastapi import APIRouter, Depends, HTTPException, Response
+from pathlib import Path
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from bson import ObjectId
-from typing import List
-import httpx
 
 from app.dependencies import get_db, get_current_active_user
 from app.schemas.analysis import AnalysisResultOut, FieldHistoryItem, DiseaseSummaryItem, DetectionItem
@@ -44,7 +43,6 @@ async def get_by_upload(
 ):
     doc = await db.analysis_results.find_one({"upload_id": upload_id})
     if not doc:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Result not found — processing may still be running")
     return DataResponse(data=_build_result(doc))
 
@@ -92,20 +90,12 @@ async def download_pdf(
         {"upload_id": upload_id}, projection={"report_pdf_url": 1}
     )
     if not doc or not doc.get("report_pdf_url"):
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="PDF report not available")
-
-    # Stream PDF from S3
-    from fastapi.responses import FileResponse
-    from pathlib import Path
 
     pdf_path = Path(doc["report_pdf_url"])
 
     if not pdf_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="PDF not found"
-        )
+        raise HTTPException(status_code=404, detail="PDF not found")
 
     return FileResponse(
         path=str(pdf_path),
