@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from app.database import db
 from app.config import get_settings
 from app.dependencies import get_optional_current_user
+from app.utils.ratelimit import rate_limit
 from app.services.disease_predictor import (
     DomainGuardUnavailableError,
     InvalidImageError,
@@ -30,7 +31,29 @@ def _run_inference(image_bytes: bytes) -> dict:
     return get_predictor().predict(image_bytes)
 
 
-@router.post("/predict")
+# Magic-byte signatures for the only accepted upload types. Content-Type is
+# client-controlled and never trusted on its own.
+_IMAGE_SIGNATURES = (
+    b"\xff\xd8\xff",                    # JPEG
+    b"\x89PNG\r\n\x1a\n",               # PNG
+)
+
+
+def _has_allowed_signature(image_bytes: bytes) -> bool:
+    if image_bytes.startswith(_IMAGE_SIGNATURES):
+        return True
+    # WebP: "RIFF" <size:4> "WEBP"
+    return (
+        len(image_bytes) >= 12
+        and image_bytes[:4] == b"RIFF"
+        and image_bytes[8:12] == b"WEBP"
+    )
+
+
+@router.post(
+    "/predict",
+    dependencies=[Depends(rate_limit(10, 60, "predict"))],
+)
 async def predict_disease(
     file: UploadFile = File(...),
     current_user=Depends(get_optional_current_user),
@@ -52,6 +75,8 @@ async def predict_disease(
         raise HTTPException(400, "Empty upload")
     if len(image_bytes) > settings.MAX_UPLOAD_SIZE:
         raise HTTPException(413, "Image too large")
+    if not _has_allowed_signature(image_bytes):
+        raise HTTPException(415, "Only JPEG, PNG or WebP images are allowed")
 
     # Inference runs off the event loop.
     start_time = time.perf_counter()

@@ -10,9 +10,22 @@ import logging
 from app.config import settings
 from app.database import db
 from app.utils.logger import setup_logging
-from app.routers import auth, farms, fields, uploads, results, notifications, health
+from app.routers import auth, farms, health
 from app.routers import predict
 from app.routers import predictions
+
+# Domain routers with incomplete owner scoping — mounted only when
+# ENABLE_DOMAIN_ROUTERS=true. Import lazily so disabling truly removes them.
+if settings.ENABLE_DOMAIN_ROUTERS:
+    from app.routers import fields, uploads, results, notifications
+    _domain_routers = [
+        (fields.router, "Fields"),
+        (uploads.router, "Uploads"),
+        (results.router, "Results"),
+        (notifications.router, "Notifications"),
+    ]
+else:
+    _domain_routers = []
 from app.services.disease_predictor import get_predictor
 from starlette.concurrency import run_in_threadpool
 
@@ -48,8 +61,11 @@ app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="AgriScan 3D AI Crop Disease Detection API",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    # Interactive API docs are a dev convenience; disable them in production
+    # so endpoint schemas are not publicly enumerable.
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
     lifespan=lifespan,
     swagger_ui_parameters={"persistAuthorization": True}
 )
@@ -61,7 +77,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # (browsers reject "Access-Control-Allow-Origin: *" on credentialed requests).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,10 +116,7 @@ app.include_router(health.router, tags=["Health"])
 for router, tag in [
     (auth.router, "Auth"),
     (farms.router, "Farms"),
-    (fields.router, "Fields"),
-    (uploads.router, "Uploads"),
-    (results.router, "Results"),
-    (notifications.router, "Notifications"),
+    *_domain_routers,
     (predict.router, "Disease Prediction"),
     (predictions.router, "Predictions"),
 ]:

@@ -1,15 +1,21 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError
 from passlib.context import CryptContext
 
 from app.config import settings
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
+    bcrypt__rounds=12,
     deprecated="auto",
 )
+
+# Decode is pinned to HS256 regardless of the configured algorithm name so a
+# token can never talk the verifier into accepting e.g. alg=none or RS256.
+_DECODE_ALGORITHMS = ["HS256"]
 
 
 def hash_password(password: str) -> str:
@@ -22,8 +28,9 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def _create_token(data: dict, expire_delta: timedelta):
     payload = data.copy()
-    payload["iat"] = datetime.now(timezone.utc)
-    payload["exp"] = datetime.now(timezone.utc) + expire_delta
+    now = datetime.now(timezone.utc)
+    payload["iat"] = now
+    payload["exp"] = now + expire_delta
 
     return jwt.encode(
         payload,
@@ -58,38 +65,42 @@ def create_refresh_token(subject: str):
     )
 
 
-def decode_access_token(token: str):
-
+def _decode_token(token: str) -> dict | None:
     try:
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
+            algorithms=_DECODE_ALGORITHMS,
+            options={"require": ["exp", "sub"]},
         )
-
-        # Callers only ever see a payload of the expected token type.
-        if payload.get("type") != "access":
-            return None
-
-        return payload
-
-    except JWTError:
+    except PyJWTError:
         return None
+
+    # A token without a usable subject is never valid.
+    if not payload.get("sub"):
+        return None
+
+    return payload
+
+
+def decode_access_token(token: str):
+    payload = _decode_token(token)
+    if payload is None:
+        return None
+
+    # Callers only ever see a payload of the expected token type.
+    if payload.get("type") != "access":
+        return None
+
+    return payload
 
 
 def decode_refresh_token(token: str):
-
-    try:
-        payload = jwt.decode(
-            token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
-        )
-
-        if payload.get("type") != "refresh":
-            return None
-
-        return payload
-
-    except JWTError:
+    payload = _decode_token(token)
+    if payload is None:
         return None
+
+    if payload.get("type") != "refresh":
+        return None
+
+    return payload

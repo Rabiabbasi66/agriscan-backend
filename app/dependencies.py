@@ -10,7 +10,17 @@ from app.utils.security import decode_access_token
 
 logger = logging.getLogger(__name__)
 
-security = HTTPBearer()
+# auto_error=False so a missing Authorization header reaches our handler and
+# returns a proper 401 + WWW-Authenticate instead of HTTPBearer's default 403.
+security = HTTPBearer(auto_error=False)
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def get_db() -> AsyncIOMotorDatabase:
@@ -33,16 +43,17 @@ async def _find_active_user(payload: dict) -> dict | None:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     # Tokens are never logged; only the pass/fail reason is recorded.
+    if credentials is None:
+        logger.info("Auth rejected: missing bearer token")
+        raise _unauthorized("Not authenticated")
+
     payload = decode_access_token(credentials.credentials)
     if not payload:
         logger.info("Auth rejected: invalid or expired token")
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token",
-        )
+        raise _unauthorized("Invalid or expired token")
 
     if db.database is None:
         raise HTTPException(
@@ -53,10 +64,7 @@ async def get_current_user(
     user = await _find_active_user(payload)
     if not user:
         logger.info("Auth rejected: user not found or inactive")
-        raise HTTPException(
-            status_code=401,
-            detail="User not found",
-        )
+        raise _unauthorized("User not found")
 
     return user
 

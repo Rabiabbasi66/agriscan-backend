@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime, timezone
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from app.config import settings
 from app.dependencies import get_db, get_current_active_user
 from app.utils.security import (
@@ -22,11 +23,23 @@ from app.schemas.user import (
     ChangePassword,
 )
 from app.schemas.common import DataResponse
+from app.utils.ratelimit import rate_limit
 
 router = APIRouter(
     prefix="/auth",
     tags=["Auth"],
 )
+
+# Lazily-computed bcrypt hash used only to equalize login timing for unknown
+# emails (a real hash keeps verify_password on the same code path).
+_dummy_password_hash: str | None = None
+
+
+def _get_dummy_password_hash() -> str:
+    global _dummy_password_hash
+    if _dummy_password_hash is None:
+        _dummy_password_hash = hash_password("not-a-real-password")
+    return _dummy_password_hash
 
 
 def require_database(database):
@@ -48,6 +61,7 @@ def require_database(database):
     "/register",
     response_model=DataResponse[UserOut],
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit(5, 60, "auth.register"))],
 )
 async def register(
     data: UserRegister,
@@ -57,20 +71,30 @@ async def register(
     existing = await db.users.find_one({"email": data.email})
 
     if existing:
-        raise HTTPException(400, "Email already registered")
+        raise HTTPException(409, "Email already registered")
 
+    # Role is never taken from the request body: public registration always
+    # creates a non-privileged "farmer" account. Privileged roles are granted
+    # out-of-band (e.g. direct DB update by an administrator).
     user = {
         "email": data.email,
         "hashed_password": hash_password(data.password),
         "full_name": data.full_name,
-        "phone": data.phone,
-        "role": data.role,
+        "role": "farmer",
         "is_active": True,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
+    # Store phone only when provided — the unique sparse index on `phone`
+    # would otherwise treat every phone=null document as a duplicate.
+    if data.phone is not None:
+        user["phone"] = data.phone
 
-    result = await db.users.insert_one(user)
+    try:
+        result = await db.users.insert_one(user)
+    except DuplicateKeyError:
+        # Unique index on email fired (race with a concurrent register).
+        raise HTTPException(409, "Email already registered")
     user["_id"] = result.inserted_id
 
     return DataResponse(
@@ -91,6 +115,7 @@ async def register(
 @router.post(
     "/login",
     response_model=TokenResponse,
+    dependencies=[Depends(rate_limit(5, 60, "auth.login"))],
 )
 async def login(
     data: UserLogin,
@@ -100,6 +125,10 @@ async def login(
     user = await db.users.find_one({"email": data.email})
 
     if not user:
+        # Run a bcrypt verify against a dummy hash so unknown-email and
+        # wrong-password logins take similar time (no user enumeration via
+        # response timing).
+        verify_password(data.password, _get_dummy_password_hash())
         raise HTTPException(401, "Invalid credentials")
 
     if not verify_password(data.password, user["hashed_password"]):

@@ -16,6 +16,11 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+# Decompression-bomb guard: refuse to decode images above ~100 MP. PIL raises
+# DecompressionBombError beyond this; the predictor already maps that to a
+# clean 400. Set explicitly so the limit does not depend on Pillow defaults.
+Image.MAX_IMAGE_PIXELS = 100_000_000
+
 from app.config import get_settings
 from app.services.disease_info import get_category, get_disease_info
 

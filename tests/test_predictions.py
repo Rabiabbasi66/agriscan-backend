@@ -242,7 +242,7 @@ async def test_predict_still_works_anonymous(monkeypatch):
             resp = await c.post(
                 "/api/v1/predict",
                 params={"user_id": str(USER_B["_id"])},  # impersonation attempt
-                files={"file": ("leaf.jpg", b"fake", "image/jpeg")},
+                files={"file": ("leaf.jpg", b"\xff\xd8\xff" + b"fake", "image/jpeg")},
             )
         assert resp.status_code == 200
         body = resp.json()
@@ -271,7 +271,7 @@ async def test_predict_attributed_to_authenticated_user(monkeypatch):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             resp = await c.post(
                 "/api/v1/predict",
-                files={"file": ("leaf.jpg", b"fake", "image/jpeg")},
+                files={"file": ("leaf.jpg", b"\xff\xd8\xff" + b"fake", "image/jpeg")},
             )
         assert resp.status_code == 200
         assert collection.insert_one.call_args[0][0]["user_id"] == str(USER_A["_id"])

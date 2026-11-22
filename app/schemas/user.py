@@ -6,14 +6,22 @@ import re
 
 class UserRegister(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=64)
+    password: str = Field(..., min_length=8, max_length=72)
     full_name: str = Field(..., min_length=2, max_length=100)
     phone: Optional[str] = None
-    role: Literal["farmer", "agronomist", "admin"] = "farmer"  # Added "admin"
+    # NOTE: no `role` field — role is assigned server-side only. Any
+    # client-supplied role is ignored by Pydantic (extra="ignore" default is
+    # overridden below to be explicit).
+
+    model_config = {"extra": "ignore"}
 
     @field_validator("password")
     @classmethod
     def strong_password(cls, v: str) -> str:
+        # bcrypt silently truncates at 72 bytes; reject longer input so two
+        # different passwords cannot collide after truncation.
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 bytes")
         if not re.search(r"[A-Z]", v):
             raise ValueError("Password must contain an uppercase letter")
         if not re.search(r"[a-z]", v):
@@ -69,11 +77,13 @@ class UserUpdate(BaseModel):
 
 class ChangePassword(BaseModel):
     old_password: str
-    new_password: str = Field(..., min_length=8, max_length=64)
+    new_password: str = Field(..., min_length=8, max_length=72)
     
     @field_validator("new_password")
     @classmethod
     def strong_password(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 bytes")
         if not re.search(r"[A-Z]", v):
             raise ValueError("Password must contain an uppercase letter")
         if not re.search(r"[a-z]", v):

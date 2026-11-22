@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AliasChoices, Field
 from functools import lru_cache
 from typing import List
+import json
 
 
 class Settings(BaseSettings):
@@ -15,25 +16,64 @@ class Settings(BaseSettings):
     APP_NAME: str = "AgriScan 3D API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
+    # Deployment environment: "development" | "production". Anything other
+    # than "development" is treated as production for security decisions.
+    ENV: str = "development"
 
-    ALLOWED_ORIGINS: List[str] = [
-        # Local dev: Vite binds 0.0.0.0, so the browser may open the app as
-        # either localhost or 127.0.0.1 — both must be accepted or the auth /
-        # history calls are blocked by CORS and the UI stays in its loading
-        # state.
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8443",
-        "http://127.0.0.1:8443",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        # Deployed frontends (public URLs, also overridable via env).
-        "https://agriscan-3d.netlify.app",
-        "https://agriscan-3d.vercel.app",
-    ]
+    @property
+    def is_production(self) -> bool:
+        return self.ENV.lower() != "development"
+
+    # Optional remote classifier endpoint (Cloud Run etc.). When unset the
+    # backend uses the locally loaded weights in models/best.pt.
+    CLASSIFIER_API_URL: str = ""
+    # Server-side secret forwarded to the remote classifier. NEVER expose to
+    # the browser bundle.
+    CLASSIFIER_API_KEY: str = ""
+
+    # Domain routers (fields, uploads, results, notifications) are not used by
+    # the current frontend and their owner-scoping is incomplete (IDOR risk).
+    # They stay in the codebase but are NOT mounted unless explicitly enabled.
+    ENABLE_DOMAIN_ROUTERS: bool = False
+
+    # Comma-separated string (ALLOWED_ORIGINS=a,b,c). Parsed lazily by the
+    # allowed_origins property — a plain str avoids pydantic-settings'
+    # JSON-only decoding for list fields.
+    ALLOWED_ORIGINS: str = ""
+
+    @property
+    def allowed_origins(self) -> List[str]:
+        raw = self.ALLOWED_ORIGINS.strip()
+        env_origins: List[str] = []
+        if raw.startswith("["):
+            # JSON list form (legacy .env style)
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    env_origins = [str(o).strip() for o in parsed if str(o).strip()]
+            except json.JSONDecodeError:
+                env_origins = []
+        else:
+            env_origins = [o.strip() for o in raw.split(",") if o.strip()]
+        if env_origins:
+            return env_origins
+        if self.is_production:
+            # Production with no explicit origins: deny cross-origin browser
+            # calls rather than silently trusting localhost.
+            return []
+        return [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:8443",
+            "http://127.0.0.1:8443",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "https://agriscan-3d.netlify.app",
+            "https://agriscan-3d.vercel.app",
+        ]
 
     # Upload security: maximum accepted image size in bytes (10 MB default).
-    MAX_UPLOAD_SIZE: int = 10_485_760
+    MAX_UPLOAD_SIZE: int = 5_242_880  # 5 MB — predict is the only consumer
 
     # MongoDB (Local Compass)
     # MONGODB_URI / MONGODB_DB_NAME are read from the environment or the local
@@ -53,8 +93,8 @@ class Settings(BaseSettings):
     def mongodb_db_name(self) -> str:
         return self.MONGODB_DB_NAME
 
-    # JWT
-    JWT_SECRET_KEY: str = "change-me-in-production-32-chars-min"
+    # JWT — no default: the app refuses to boot without a strong secret.
+    JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -107,7 +147,13 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    if not s.JWT_SECRET_KEY or len(s.JWT_SECRET_KEY) < 32:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is missing or shorter than 32 characters. "
+            "Set a strong random secret in the environment before starting."
+        )
+    return s
 
 
 settings = get_settings()

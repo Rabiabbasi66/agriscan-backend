@@ -207,7 +207,7 @@ async def test_predict_persists_to_mongodb(monkeypatch, stub_predictor):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/api/v1/predict",
-            files={"file": ("leaf.jpg", io.BytesIO(b"fake-image-bytes"), "image/jpeg")},
+            files={"file": ("leaf.jpg", io.BytesIO(b"\xff\xd8\xff" + b"fake-image-bytes"), "image/jpeg")},
         )
 
     assert resp.status_code == 200
@@ -237,7 +237,7 @@ async def test_predict_survives_db_save_failure(monkeypatch, stub_predictor):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             "/api/v1/predict",
-            files={"file": ("leaf.jpg", io.BytesIO(b"fake-image-bytes"), "image/jpeg")},
+            files={"file": ("leaf.jpg", io.BytesIO(b"\xff\xd8\xff" + b"fake-image-bytes"), "image/jpeg")},
         )
 
     assert resp.status_code == 200

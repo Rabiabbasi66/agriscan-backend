@@ -24,6 +24,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Google Cloud Run injects the runtime $PORT; fall back to 8000 for local
-# container runs. Shell-based form so ${PORT:-8000} is expanded at startup.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Hugging Face Spaces requires the container to listen on port 7860.
+# $PORT still overrides for other hosts (e.g. Cloud Run injects it).
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
