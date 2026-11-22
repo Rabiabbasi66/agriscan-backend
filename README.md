@@ -10,19 +10,23 @@ pinned: false
 
 # AgriScan 3D — FastAPI Backend
 
-AI crop-disease detection API (YOLOv8n classifier, 38 PlantVillage classes)
-with JWT auth and MongoDB persistence.
+AI crop-disease detection API. YOLOv8n classifier (38 PlantVillage classes),
+JWT auth, MongoDB persistence, per-IP rate limiting, hardened upload validation.
 
-## Required Space secrets (Settings → Variables and secrets)
+**Live:** `https://rabiabbasi66--agriscan-api-fastapi-app.us-east.modal.run`
+(hosted on Modal.com serverless — scales to zero when idle)
 
-| Variable | Example |
-|---|---|
-| `MONGODB_URI` | `mongodb+srv://<username>:<password>@cluster.mongodb.net/agriscan` |
-| `JWT_SECRET_KEY` | long random string (≥32 chars) |
-| `ALLOWED_ORIGINS` | `https://your-app.vercel.app` (comma-separated) |
-| `ENV` | `production` |
+## Environment variables
 
-The app refuses to start without a valid `JWT_SECRET_KEY`.
+| Variable | Required | Notes |
+|---|---|---|
+| `MONGODB_URI` | yes | MongoDB Atlas connection string |
+| `JWT_SECRET_KEY` | yes | ≥32 chars, no default — app refuses to start without it |
+| `ALLOWED_ORIGINS` | prod | Comma-separated origins, e.g. `https://app.vercel.app` |
+| `ENV` | prod | `production` disables `/docs`, `/redoc`, `/openapi.json` |
+| `ENABLE_DOMAIN_ROUTERS` | no | `false` (default) — fields/uploads/results/notifications off |
+
+See `.env.example` for the full list.
 
 ## Local run
 
@@ -31,4 +35,25 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 7860
 ```
 
-API docs: `/docs` (disabled when `ENV=production`).
+## Modal.com deploy
+
+```bash
+pip install modal && modal token new
+modal secret create agriscan-secrets \
+  MONGODB_URI="..." JWT_SECRET_KEY="..." \
+  ALLOWED_ORIGINS="https://your-app.vercel.app" ENV="production"
+modal deploy modal_app.py
+```
+
+## Docker
+
+```bash
+docker build -t agriscan-api .
+docker run -p 7860:7860 --env-file .env agriscan-api
+```
+
+## Tests
+
+```bash
+pytest tests/ -q
+```
