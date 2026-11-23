@@ -78,6 +78,10 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
+    # Vercel preview deployments get a new random subdomain per deploy, so
+    # exact-match origins can never cover them. Allow any *.vercel.app origin
+    # for this app's own previews; credentialed CORS still rejects "*".
+    allow_origin_regex=r"https://[a-zA-Z0-9-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
