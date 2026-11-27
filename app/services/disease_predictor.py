@@ -159,13 +159,25 @@ class DiseasePredictor:
             )
 
         inference_start = time.perf_counter()
+        # Test-time augmentation: classify the original and its horizontal
+        # mirror, then average the full probability vectors. Mirroring is
+        # label-preserving for leaf images and smooths borderline calls where
+        # lighting/pose splits the softmax mass across same-crop diseases.
+        flipped = image.transpose(Image.FLIP_LEFT_RIGHT)
         with self._lock:
             results = self.model.predict(
-                source=image,
+                source=[image, flipped],
                 imgsz=self.image_size,
                 verbose=False,
             )
-            features = self._features.numpy().reshape(-1) if self._features is not None else None
+            # The pre-hook fires once per image in the TTA batch; keep the
+            # mean embedding so the domain guard always sees one 1280-d vector.
+            if self._features is not None:
+                feat = self._features.detach().float().mean(dim=0) \
+                    if self._features.dim() > 1 else self._features.detach().float()
+                features = feat.numpy().reshape(-1)
+            else:
+                features = None
         inference_ms = round((time.perf_counter() - inference_start) * 1000, 2)
 
         if features is None:
@@ -177,23 +189,44 @@ class DiseasePredictor:
         if not decision.supported:
             raise UnsupportedImageError(decision.reason or "Unsupported image")
 
-        probs = results[0].probs if results else None
-        if probs is None:
+        # Average the softmax vectors of the original and mirrored passes so a
+        # borderline single-view call cannot swing the reported class.
+        prob_vecs = []
+        for r in results or []:
+            p = getattr(r, "probs", None)
+            data = getattr(p, "data", None) if p is not None else None
+            if data is not None:
+                prob_vecs.append(data.detach().cpu().numpy().reshape(-1))
+        if not prob_vecs:
             raise ModelNotReadyError("Checkpoint returned no classification output")
 
-        top_idx = int(probs.top1)
-        confidence = float(probs.top1conf)
+        import numpy as np
+        avg_probs = np.mean(prob_vecs, axis=0)
+        order = np.argsort(-avg_probs)
+
+        top_idx = int(order[0])
+        confidence = float(avg_probs[top_idx])
         class_name = self.class_names[top_idx] if 0 <= top_idx < self.num_classes \
             else f"class_{top_idx}"
 
         top_k = [
             {
                 "class_name": self.class_names[int(i)],
-                "confidence": round(float(c) * 100, 2),
+                "confidence": round(float(avg_probs[int(i)]) * 100, 2),
                 **_parse_class_name(self.class_names[int(i)]),
             }
-            for i, c in zip(probs.top5, probs.top5conf)
+            for i in order[:5]
         ]
+
+        # Crop-level aggregation: sum the averaged probabilities of every class
+        # belonging to each crop. The reported crop is the argmax marginal, so
+        # split votes across one crop's diseases still count toward that crop.
+        crop_totals: dict[str, float] = {}
+        for i, name in enumerate(self.class_names):
+            crop_key = name.split("___", 1)[0]
+            crop_totals[crop_key] = crop_totals.get(crop_key, 0.0) + float(avg_probs[i])
+        best_crop_key = max(crop_totals, key=crop_totals.get)
+        crop_confidence = round(crop_totals[best_crop_key] * 100, 2)
 
         detected = confidence >= self.min_confidence
 
@@ -228,6 +261,9 @@ class DiseasePredictor:
             "model_file": self.model_path.name,
             "num_classes": self.num_classes,
             "confidence_threshold": round(self.min_confidence * 100, 2),
+            # TTA + crop aggregation diagnostics (extra keys; UI ignores them).
+            "tta": "hflip-avg",
+            "crop_confidence": crop_confidence,
             # None when the style signal alone accepted the image and the
             # ImageNet pass was skipped (see DomainGuard.evaluate).
             "plant_score": (
