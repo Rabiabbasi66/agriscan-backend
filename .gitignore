@@ -23,3 +23,6 @@ __pycache__/
 # Runtime logs
 logs/
 *.log
+plantdoc_raw/
+runs/
+test_images/nonplant_test.png
