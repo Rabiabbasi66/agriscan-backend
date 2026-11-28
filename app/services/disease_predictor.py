@@ -14,6 +14,8 @@ import threading
 import time
 from pathlib import Path
 
+import numpy as np
+
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 # Decompression-bomb guard: refuse to decode images above ~100 MP. PIL raises
@@ -159,22 +161,25 @@ class DiseasePredictor:
             )
 
         inference_start = time.perf_counter()
-        # Test-time augmentation: classify the original and its horizontal
-        # mirror, then average the full probability vectors. Mirroring is
-        # label-preserving for leaf images and smooths borderline calls where
-        # lighting/pose splits the softmax mass across same-crop diseases.
-        flipped = image.transpose(Image.FLIP_LEFT_RIGHT)
+        # ── Pass 1: full-image TTA ──────────────────────────────────────
+        # Original + horizontal flip + vertical flip; label-preserving for
+        # leaf images and smooths borderline calls where lighting/pose
+        # splits the softmax mass across same-crop diseases.
+        variants = [
+            image,
+            image.transpose(Image.FLIP_LEFT_RIGHT),
+            image.transpose(Image.FLIP_TOP_BOTTOM),
+        ]
         with self._lock:
-            results = self.model.predict(
-                source=[image, flipped],
-                imgsz=self.image_size,
-                verbose=False,
+            full_results = self.model.predict(
+                source=variants, imgsz=self.image_size, verbose=False,
             )
-            # The pre-hook fires once per image in the TTA batch; keep the
-            # mean embedding so the domain guard always sees one 1280-d vector.
+            # The pre-hook fires once per image in the batch; keep the mean
+            # embedding so the domain guard always sees one 1280-d vector.
             if self._features is not None:
-                feat = self._features.detach().float().mean(dim=0) \
-                    if self._features.dim() > 1 else self._features.detach().float()
+                feat = self._features.detach().float()
+                if feat.dim() > 1:
+                    feat = feat.mean(dim=0)
                 features = feat.numpy().reshape(-1)
             else:
                 features = None
@@ -189,19 +194,38 @@ class DiseasePredictor:
         if not decision.supported:
             raise UnsupportedImageError(decision.reason or "Unsupported image")
 
-        # Average the softmax vectors of the original and mirrored passes so a
-        # borderline single-view call cannot swing the reported class.
-        prob_vecs = []
-        for r in results or []:
-            p = getattr(r, "probs", None)
-            data = getattr(p, "data", None) if p is not None else None
-            if data is not None:
-                prob_vecs.append(data.detach().cpu().numpy().reshape(-1))
-        if not prob_vecs:
-            raise ModelNotReadyError("Checkpoint returned no classification output")
+        # ── Pass 2: multi-crop tiles ────────────────────────────────────
+        # Wide/field photos can bury a small leaf inside background. Four
+        # overlapping ~60% tiles (each with an hflip pair) let the model see
+        # leaf-sized regions; small close-ups skip tiling entirely.
+        tiles = _crop_tiles(image)
+        tile_results = []
+        if tiles:
+            tile_sources = []
+            for tile in tiles:
+                tile_sources.extend([tile, tile.transpose(Image.FLIP_LEFT_RIGHT)])
+            with self._lock:
+                tile_results = self.model.predict(
+                    source=tile_sources, imgsz=self.image_size, verbose=False,
+                )
+            inference_ms = round(
+                (time.perf_counter() - inference_start) * 1000, 2
+            )
 
-        import numpy as np
-        avg_probs = np.mean(prob_vecs, axis=0)
+        # ── Aggregate probability vectors ───────────────────────────────
+        # Full-image views and tile views each get half the weight, so a
+        # detail found in one tile can compete with the whole-frame call
+        # without a single zoomed crop dominating the result.
+        full_vecs = _prob_vectors(full_results)
+        if not full_vecs:
+            raise ModelNotReadyError("Checkpoint returned no classification output")
+        full_avg = np.mean(full_vecs, axis=0)
+
+        tile_vecs = _prob_vectors(tile_results)
+        if tile_vecs:
+            avg_probs = 0.5 * full_avg + 0.5 * np.mean(tile_vecs, axis=0)
+        else:
+            avg_probs = full_avg
         order = np.argsort(-avg_probs)
 
         top_idx = int(order[0])
@@ -229,6 +253,16 @@ class DiseasePredictor:
         crop_confidence = round(crop_totals[best_crop_key] * 100, 2)
 
         detected = confidence >= self.min_confidence
+
+        # Confidence banding: lets the UI soften its tone on borderline calls
+        # without changing the pass/fail contract (detected stays threshold-
+        # based). "low" always coincides with detected=False.
+        if confidence >= 0.80:
+            confidence_level = "high"
+        elif detected:
+            confidence_level = "medium"
+        else:
+            confidence_level = "low"
 
         if detected:
             parsed = _parse_class_name(class_name)
@@ -261,9 +295,16 @@ class DiseasePredictor:
             "model_file": self.model_path.name,
             "num_classes": self.num_classes,
             "confidence_threshold": round(self.min_confidence * 100, 2),
-            # TTA + crop aggregation diagnostics (extra keys; UI ignores them).
-            "tta": "hflip-avg",
+            # TTA + multi-crop diagnostics (extra keys; UI ignores them).
+            "tta": "hflip/vflip+multicrop-avg",
+            "num_crops": len(tiles),
             "crop_confidence": crop_confidence,
+            "confidence_level": confidence_level,
+            "user_tip": (
+                None if detected else
+                "Confidence is low — try a closer, well-lit photo of a "
+                "single leaf."
+            ),
             # None when the style signal alone accepted the image and the
             # ImageNet pass was skipped (see DomainGuard.evaluate).
             "plant_score": (
@@ -296,6 +337,35 @@ class DiseasePredictor:
             logger.info("YOLOv8 inference pipeline warmed up")
         except Exception:  # non-fatal: the first request just pays the cost
             logger.exception("YOLOv8 warm-up failed")
+
+
+def _prob_vectors(results) -> list[np.ndarray]:
+    """Extract one softmax vector per result, dropping empty outputs."""
+    vecs = []
+    for r in results or []:
+        p = getattr(r, "probs", None)
+        data = getattr(p, "data", None) if p is not None else None
+        if data is not None:
+            vecs.append(data.detach().cpu().numpy().reshape(-1))
+    return vecs
+
+
+def _crop_tiles(image: Image.Image) -> list[Image.Image]:
+    """Four overlapping ~60% tiles for multi-crop inference.
+
+    Returns [] for small close-ups where tiling would only produce
+    duplicate leaf fragments and double the latency for nothing.
+    """
+    w, h = image.size
+    if min(w, h) < 320:
+        return []
+    tw, th = int(w * 0.6), int(h * 0.6)
+    xs = sorted({0, w - tw})
+    ys = sorted({0, h - th})
+    return [
+        image.crop((x, y, x + tw, y + th))
+        for y in ys for x in xs
+    ]
 
 
 def _parse_class_name(full_name: str) -> dict:
